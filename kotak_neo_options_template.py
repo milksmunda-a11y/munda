@@ -77,7 +77,9 @@ def print_trade_alert(message, alert_type="info"):
     }
     emoji = emoji_map.get(alert_type, "ℹ️")
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-    print(f"{emoji} [{timestamp}] {message}")
+    # Ensure message is converted to string to avoid NoneType errors
+    safe_message = str(message) if message is not None else "Unknown error"
+    print(f"{emoji} [{timestamp}] {safe_message}")
 
 def initializeKotakAPI():
     """Initialize Kotak Neo API client"""
@@ -97,11 +99,11 @@ def initializeKotakAPI():
         return client, trading_token
         
     except FileNotFoundError as e:
-        print_trade_alert(f"Error: Missing credential file - {e}", "error")
+        print_trade_alert(f"Error: Missing credential file - {str(e)}", "error")
         print_trade_alert("Run kotak_neo_login.py first to generate credentials", "warning")
         sys.exit()
     except Exception as e:
-        print_trade_alert(f"Error initializing Kotak API: {e}", "error")
+        print_trade_alert(f"Error initializing Kotak API: {str(e)}", "error")
         sys.exit()
 
 def getIndexSpot(stock):
@@ -141,31 +143,65 @@ def getOptionFormat(stock, expiry, strike, option_type):
 def getQuotes(symbol, client):
     """Get current LTP for a symbol"""
     try:
+        # Debug: Print the symbol being requested
+        print_trade_alert(f"Fetching quotes for {symbol}...", "info")
+        
         # Get quotes from Kotak Neo API
         quotes_resp = client.quotes(
             instrument_tokens=[{"instrument_token": symbol, "exchange_segment": "nse_fo"}],
             quote_type="ltp"
         )
         
-        if quotes_resp and "data" in quotes_resp:
-            data = quotes_resp["data"]
-            if data and "ltp" in data:
-                ltp_value = data["ltp"]
-                # Handle None or empty string values
-                if ltp_value is not None and ltp_value != "":
-                    return float(ltp_value)
-                else:
-                    print_trade_alert(f"LTP value is None or empty for {symbol}", "warning")
-                    return -1
+        print_trade_alert(f"API Response for {symbol}: {str(quotes_resp)}", "info")
         
-        print_trade_alert(f"Could not fetch LTP for {symbol}. Response: {quotes_resp}", "warning")
-        return -1
+        if quotes_resp is None:
+            print_trade_alert(f"API returned None for {symbol}", "warning")
+            return -1
+            
+        if not isinstance(quotes_resp, dict):
+            print_trade_alert(f"API response is not a dictionary for {symbol}", "warning")
+            return -1
         
-    except ValueError as e:
-        print_trade_alert(f"Error converting LTP to float for {symbol}: {e}", "error")
-        return -1
+        if "data" not in quotes_resp:
+            print_trade_alert(f"No 'data' key in API response for {symbol}", "warning")
+            return -1
+        
+        data = quotes_resp["data"]
+        
+        if data is None:
+            print_trade_alert(f"Data field is None for {symbol}", "warning")
+            return -1
+        
+        if not isinstance(data, dict):
+            print_trade_alert(f"Data is not a dictionary for {symbol}", "warning")
+            return -1
+            
+        if "ltp" not in data:
+            print_trade_alert(f"No 'ltp' key in data for {symbol}", "warning")
+            return -1
+        
+        ltp_value = data["ltp"]
+        
+        # Handle None or empty string values
+        if ltp_value is None:
+            print_trade_alert(f"LTP value is None for {symbol}", "warning")
+            return -1
+        
+        if ltp_value == "":
+            print_trade_alert(f"LTP value is empty string for {symbol}", "warning")
+            return -1
+        
+        # Try to convert to float
+        try:
+            ltp_float = float(ltp_value)
+            print_trade_alert(f"Successfully fetched LTP for {symbol}: ₹{ltp_float:.2f}", "success")
+            return ltp_float
+        except (ValueError, TypeError) as e:
+            print_trade_alert(f"Could not convert LTP to float for {symbol}: {str(e)}", "error")
+            return -1
+        
     except Exception as e:
-        print_trade_alert(f"Error fetching quotes for {symbol}: {e}", "error")
+        print_trade_alert(f"Exception fetching quotes for {symbol}: {str(e)}", "error")
         return -1
 
 def manualLTP(symbol, client):
@@ -173,7 +209,7 @@ def manualLTP(symbol, client):
     try:
         return getQuotes(symbol, client)
     except Exception as e:
-        print_trade_alert(f"Error getting manual LTP: {e}", "error")
+        print_trade_alert(f"Error getting manual LTP for {symbol}: {str(e)}", "error")
         return -1
 
 def findStrikePriceATM(client):
@@ -182,6 +218,8 @@ def findStrikePriceATM(client):
     
     # Get current index LTP
     index_name = getIndexSpot(stock)
+    print_trade_alert(f"Looking for ATM strike using index: {index_name}", "info")
+    
     ltp = getQuotes(index_name, client)
     
     if ltp == -1:
@@ -424,7 +462,7 @@ def exitPosition(atmCE, ceSL, ceTarget, ce_entry_price, atmPE, peSL, peTarget, p
             time.sleep(1)
 
         except Exception as e:
-            print_trade_alert(f"Error in position monitoring: {e}", "warning")
+            print_trade_alert(f"Error in position monitoring: {str(e)}", "warning")
             time.sleep(1)
 
 def placeOrder1(inst, t_type, qty, order_type, price, variety, papertrading=0, producttype="intraday_eq", client=None):
@@ -441,7 +479,7 @@ def placeOrder1(inst, t_type, qty, order_type, price, variety, papertrading=0, p
         print_trade_alert(f"{order_emoji} Order: {inst} {t_type} {qty} @ ₹{price:.2f}", "success")
         
     except Exception as e:
-        print_trade_alert(f"Error logging trade: {e}", "warning")
+        print_trade_alert(f"Error logging trade: {str(e)}", "warning")
 
     if papertrading == 0:
         return 0
@@ -466,7 +504,7 @@ def placeOrder1(inst, t_type, qty, order_type, price, variety, papertrading=0, p
         
         return 0
     except Exception as e:
-        print_trade_alert(f"Error placing order: {e}", "error")
+        print_trade_alert(f"Error placing order: {str(e)}", "error")
         return 0
 
 def checkTime_tofindStrike(client):
